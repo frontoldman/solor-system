@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Title</title>
+</head>
+<body>
+<canvas id="canvas" width="400" height="400"></canvas>
+<script id="vs_s" type="text/plain">
+//顶点着色器
+attribute vec3 po;
+attribute vec2 mp;
+attribute vec3 no;
+uniform mat4 tra;
+uniform mat4 pro;
+uniform vec3 li_co;
+uniform vec3 li_di;
+varying vec3 li;
+varying vec2 mp_v;
+void main(){
+  gl_Position=pro*tra*vec4(po,1.0);
+  mp_v=mp;
+  vec3 no_di=(tra*vec4(no,0.0)).xyz;
+  float li_we=max(-dot(li_di,no_di),0.0);
+  //由于颜色必须从贴图上计算
+  //这里直接把光照变化向量传入片段着色器
+  li=li_we*li_co;
+}
+</script>
+<script id="fs_s" type="text/plain">
+//片段着色器
+uniform lowp vec3 li_en;
+uniform sampler2D tex;
+varying lowp vec3 li;
+varying lowp vec2 mp_v;
+void main(){
+ // gl_FragColor=texture2D(tex,mp_v)* vec4(li,1.0)+vec4(li_en,1.0);
+  gl_FragColor=texture2D(tex,mp_v);
+ // gl_FragColor=vec4(li,1.0)+vec4(li_en,1.0);
+ // gl_FragColor=vec4(1.0, 0.0, 0.0, 1.0);
+}
+</script>
+<script>
+  //准备
+  var webgl,program,vs,fs,dat,tmp,i,j;
+  webgl=canvas.getContext("webgl");
+  program=webgl.createProgram();
+  vs=webgl.createShader(webgl.VERTEX_SHADER);
+  fs=webgl.createShader(webgl.FRAGMENT_SHADER);
+  webgl.shaderSource(vs,vs_s.textContent);
+  webgl.shaderSource(fs,fs_s.textContent);
+  webgl.compileShader(vs);
+  webgl.compileShader(fs);
+  webgl.attachShader(program,vs);
+  webgl.attachShader(program,fs);
+  webgl.linkProgram(program);
+  webgl.useProgram(program);
+
+  //顶点属性相关
+  var po,mp,no,count;
+  po=webgl.getAttribLocation(program,"po");
+  mp=webgl.getAttribLocation(program,"mp");
+  no=webgl.getAttribLocation(program,"no");
+  webgl.enableVertexAttribArray(po);
+  webgl.enableVertexAttribArray(mp);
+  webgl.enableVertexAttribArray(no);
+  //第一个参数n是循环次数，也就是绘制球体的精细程度
+  //后面的参数是数组引用
+  count=(function(n,po,mp,no){
+    var i,j,k,f=function(a,b){
+      var a=Math.PI*a/n,b=2*Math.PI*b/n,l=Math.sin(a);
+      return [Math.sin(b)*l,Math.cos(a),Math.cos(b)*l];
+    }; //f是球体方程的函数
+    for(i=1;i<=n;i++)for(j=1;j<=n;j++){ //二重循环遍历球体方程的两参数
+      //这里我就不用索引了，直接把每个四边形需要的6个顶点都用上
+      k=[].concat(f(i,j),f(i-1,j),f(i,j-1),f(i,j-1),f(i-1,j),f(i-1,j-1));
+      //po是顶点坐标数组，从参数传入指针的
+      po.push.apply(po,k);
+      //no是每个顶点的法向量，光照效果会用到
+      //单位球体的顶点法向量就是球心在原点上时的顶点坐标
+      no.push.apply(no,k);
+      //这个是球面上贴图的坐标
+      mp.push(
+        j/n,n-i/n, j/n,n-(i-1)/n, (j-1)/n,n-i/n,
+        (j-1)/n,n-i/n, j/n,n-(i-1)/n, (j-1)/n,n-(i-1)/n
+      );
+    };
+    return n*n*6; //返回顶点个数，绘制的时候要用到
+  })(36,po_dat=[],mp_dat=[],no_dat=[]);
+  webgl.bindBuffer(webgl.ARRAY_BUFFER,webgl.createBuffer());
+  webgl.bufferData(
+    webgl.ARRAY_BUFFER,new Float32Array(po_dat),webgl.STATIC_DRAW
+  );
+  webgl.vertexAttribPointer(po,3,webgl.FLOAT,false,0,0);
+  webgl.bindBuffer(webgl.ARRAY_BUFFER,webgl.createBuffer());
+  webgl.bufferData(
+    webgl.ARRAY_BUFFER,new Float32Array(mp_dat),webgl.STATIC_DRAW
+  );
+  webgl.vertexAttribPointer(mp,2,webgl.FLOAT,false,0,0);
+  webgl.bindBuffer(webgl.ARRAY_BUFFER,webgl.createBuffer());
+  webgl.bufferData(
+    webgl.ARRAY_BUFFER,new Float32Array(no_dat),webgl.STATIC_DRAW
+  );
+  webgl.vertexAttribPointer(no,3,webgl.FLOAT,false,0,0);
+
+  //全局属性相关
+  var tra,pro,tex,li_co,li_di,li_en;
+  tra=webgl.getUniformLocation(program,"tra");
+  pro=webgl.getUniformLocation(program,"pro");
+  tex=webgl.getUniformLocation(program,"tex");
+  li_co=webgl.getUniformLocation(program,"li_co");
+  li_di=webgl.getUniformLocation(program,"li_di");
+  li_en=webgl.getUniformLocation(program,"li_en");
+  webgl.uniformMatrix4fv(pro,false,[
+    1,0,0,0, 0,1,0,0, 0,0,-1,-1, 0,0,-2,0
+  ]);
+  webgl.uniform3fv(li_co,[0.6,0.6,0.6]);
+  tmp=-1/Math.sqrt(3); //方向向量是一个单位向量
+  webgl.uniform3fv(li_di,[tmp,tmp,tmp]); //光源在右后上角
+  webgl.uniform3fv(li_en,[0.2,0.2,0.2]);
+  var img=new Image;
+
+  img.onload=function(){
+    var texture=webgl.createTexture();
+    webgl.activeTexture(webgl.TEXTURE0);
+    webgl.bindTexture(webgl.TEXTURE_2D,texture);
+    webgl.texParameteri(
+      webgl.TEXTURE_2D,webgl.TEXTURE_MIN_FILTER,
+      webgl.LINEAR_MIPMAP_LINEAR
+    );
+
+    webgl.texImage2D(
+      webgl.TEXTURE_2D,0,webgl.RGB,webgl.RGB,webgl.UNSIGNED_BYTE,img
+    );
+
+    webgl.generateMipmap(webgl.TEXTURE_2D);
+    webgl.uniform1i(tex,0);
+    console.log(11)
+
+    draw();
+  };
+  img.src="./t1.jpg";
+
+  //绘制相关
+  webgl.enable(webgl.DEPTH_TEST);
+  webgl.pixelStorei(webgl.UNPACK_FLIP_Y_WEBGL,true);
+  function draw(){
+    var a=0;
+//    setInterval(function(){
+      var s=Math.sin(a),c=Math.cos(a);a+=0.02;
+      webgl.uniformMatrix4fv(tra,false,[
+        c,0,s,0, 0,1,0,0, -s,0,c,0, 0,0,-2,1
+      ]);
+      webgl.drawArrays(webgl.TRIANGLES,0,count);
+//    },16);
+  };
+</script>
+</body>
+</html>
